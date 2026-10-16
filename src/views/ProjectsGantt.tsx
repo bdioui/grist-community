@@ -1,8 +1,16 @@
 import React, { useCallback, useState } from 'react'
 import { Gantt, type Task as GanttTask, ViewMode as GanttViewMode } from 'gantt-task-react'
 import 'gantt-task-react/dist/index.css'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, MapPinPlus, LayersPlus, Trash } from 'lucide-react'
 import {ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import {Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle} from '../components/ui/dialog'
+import { Field, FieldGroup } from '../components/ui/field'
+import { Input } from "../components/ui/input"
+import { Label } from "../components/ui/label"
+import { format } from "date-fns"
+import { Button } from "../components/ui/button"
+
+export type MilestoneDraft = { projectId: number; title: string; due_date: string }
 
 type Props = {
     tasks: GanttTask[]
@@ -12,6 +20,9 @@ type Props = {
     onToggleExpand: (task: GanttTask) => void
     onOpenProject: (projectId: number) => void
     onOpenAction: (actionId: number) => void
+    onNewAction: (projectId: number, startDate: string) => void
+    onCreateMilestone: (draft: MilestoneDraft) => void
+    onDelete: (task: GanttTask) => void
 }
 
 const COLUMN_WIDTH: Record<string, number> = {
@@ -24,7 +35,7 @@ const ROW_HEIGHT = 40
 
 type GanttTarget =
     | { kind: 'bar'; task: GanttTask }
-    | { kind: 'empty'; row: number; date: Date }
+    | { kind: 'empty'; task: GanttTask; date: Date }
 
 // Définis hors du composant : la lib les traite comme des composants React, et
 // une nouvelle fonction à chaque rendu les démonterait puis remonterait.
@@ -56,6 +67,16 @@ function TaskListTable({ tasks, rowHeight, onExpanderClick }: { tasks: GanttTask
 }
 
 const NoTooltip = () => null
+
+// Une action peut être liée à plusieurs projets : la supprimer l'enlève partout.
+const DELETE_WARNING: Record<GanttTask['type'], string> = {
+    project:   'Le projet sera supprimé définitivement.',
+    milestone: 'Le jalon sera supprimé définitivement.',
+    task:      "L'action sera supprimée définitivement, y compris des autres projets auxquels elle est liée.",
+}
+
+// Ids : `p-<projet>`, `ms-<projet>-<jalon>`, `t-<projet>-<action>`
+const projectIdOf = (task: GanttTask) => Number(task.id.split('-')[1])
 
 // Origine de l'axe, calculée comme le fait la lib : la date de début la plus
 // ancienne des tâches visibles, reculée d'une étape puis alignée. Ce n'est pas
@@ -93,8 +114,11 @@ function computeTarget(e: React.MouseEvent<HTMLElement>, tasks: GanttTask[], vie
     const xposition = e.clientX - rect.left
     const yposition = e.clientY - rect.top
 
-    const row = Math.floor(yposition / ROW_HEIGHT)
-    const task = tasks[row]
+    // `tasks` garde les enfants des projets repliés, que la lib masque seulement
+    // à l'affichage. Les lignes ne correspondent qu'aux tâches visibles.
+    const collapsed = new Set(tasks.filter(t => t.hideChildren).map(t => t.id))
+    const visible = tasks.filter(t => !t.project || !collapsed.has(t.project))
+    const task = visible[Math.floor(yposition / ROW_HEIGHT)]
     if (!task) return null
     if ((e.target as Element).closest('.bar')) return { kind: 'bar', task }
 
@@ -126,10 +150,12 @@ function computeTarget(e: React.MouseEvent<HTMLElement>, tasks: GanttTask[], vie
     const raw  = new Date(colStart.getTime() + frac * (colEnd.getTime() - colStart.getTime()))
     const date = new Date(raw.getFullYear(), raw.getMonth(), raw.getDate())   // arrondi au jour
 
-    return { kind: 'empty', row, date }
+    return { kind: 'empty', task, date }
 }
 
-function ProjectsGantt({ tasks, viewMode, viewDate, onDateChange, onToggleExpand, onOpenProject, onOpenAction }: Props) {
+function ProjectsGantt({ tasks, viewMode, viewDate, onDateChange, onToggleExpand, onOpenProject, onOpenAction, onNewAction, onCreateMilestone, onDelete }: Props) {
+    const [draft, setDraft] = useState<MilestoneDraft | null>(null)
+    const [toDelete, setToDelete] = useState<GanttTask | null>(null)
 
     // Ids : `p-<projet>`, `ms-<projet>-<jalon>`, `t-<projet>-<action>`
     const handleDoubleClick = useCallback((task: GanttTask) => {
@@ -187,15 +213,74 @@ function ProjectsGantt({ tasks, viewMode, viewDate, onDateChange, onToggleExpand
                 </ContextMenuTrigger>
                 <ContextMenuContent>
                     {target?.kind === 'bar' && (
-                        <ContextMenuItem>Bar {target.task.name}</ContextMenuItem>
+                        <ContextMenuItem variant="destructive" onClick={() => setToDelete(target.task)}>
+                            <Trash size={12} />Supprimer
+                        </ContextMenuItem>
                     )}
                     {target?.kind === 'empty' && (
-                        <ContextMenuItem>Empty {target.date.toLocaleDateString('fr-FR')}</ContextMenuItem>
+                        <>
+                        <ContextMenuItem onClick={() => onNewAction(projectIdOf(target.task), format(target.date, 'yyyy-MM-dd'))}>
+                            <LayersPlus size={12} />Nouvelle action
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => setDraft({
+                            projectId: projectIdOf(target.task),
+                            title: '',
+                            due_date: format(target.date, 'yyyy-MM-dd'),
+                        })}>
+                            <MapPinPlus size={12} />Nouveau jalon
+                        </ContextMenuItem>
+                        </>
                     )}
-                   
                 </ContextMenuContent>
             </ContextMenu>
-            
+
+            <Dialog open={draft !== null} onOpenChange={o => { if (!o) setDraft(null) }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Ajouter un jalon</DialogTitle>
+                    </DialogHeader>
+                    <FieldGroup>
+                        <Field>
+                            <Label htmlFor="milestone-title">Titre</Label>
+                            <Input id="milestone-title" value={draft?.title ?? ''} onChange={e => setDraft(d => d && { ...d, title: e.target.value })} />
+                        </Field>
+                        <Field>
+                            <Label htmlFor="milestone-date">Date du jalon</Label>
+                            <Input id="milestone-date" type="date" value={draft?.due_date ?? ''} onChange={e => setDraft(d => d && { ...d, due_date: e.target.value })} />
+                        </Field>
+                    </FieldGroup>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline">Annuler</Button>
+                        </DialogClose>
+                        <Button
+                            disabled={!draft?.title.trim() || !draft?.due_date}
+                            onClick={() => { if (draft) { onCreateMilestone(draft); setDraft(null) } }}
+                        >
+                            Créer
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={toDelete !== null} onOpenChange={o => { if (!o) setToDelete(null) }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Supprimer « {toDelete?.name} » ?</DialogTitle>
+                        <DialogDescription>
+                            {toDelete && DELETE_WARNING[toDelete.type]}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline">Annuler</Button>
+                        </DialogClose>
+                        <Button variant="destructive" onClick={() => { if (toDelete) { onDelete(toDelete); setToDelete(null) } }}>
+                            Supprimer
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

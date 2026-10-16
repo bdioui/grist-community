@@ -58,9 +58,10 @@ import {
     getAllMemberActionCards,
     getAllProjectActionCards,
     getAllProjectMilestones,
-    updateActionCard, 
+    updateActionCard, deleteActionCard,
     createFormation,
-    getProjectExpanses, setExpanseAllocations
+    getProjectExpanses, setExpanseAllocations,
+    type ActionCardCreateForm,
 } from '@/lib/api'
 import { type ProjectCall, type Project, type FinancialAgreement, type Axis, type Status, type Partner, type Member, type ProjectMember, type Kpi, type KpiEntry, type ProjectPartner, type ProjectMilestone, type ActionCardFull, type Category, type TimeEntry, type Formation, type ProjectFormation, type ProjectAttachment, type Expanse, type Supplier, type BudgetCategory, type Publication, type PublicationMember, type Lab, type ToDoList, type ToDoItem, type MemberActionCard, type AgreementDirection, type ProjectActionCard, type ProjectExpanse } from '@/lib/types'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -69,6 +70,8 @@ import SearchInput from '@/components/SearchInput'
 import MemberSearchInput from '@/components/MemberSearchInput'
 import { ScrollableTabBar } from '@/components/ScrollableTabBar'
 import AllocationDialog from '../components/AllocationDialog'
+import { type MilestoneDraft } from '@/views/ProjectsGantt'
+import ActionCardSheet from '@/views/actions/ActionCardSheet'
 
 // --- Couleurs de statut ---
 
@@ -4461,6 +4464,57 @@ export default function Projects() {
         if (a) setSelectedActionCard(a)
     }, [actionCards])
 
+    // Création depuis le clic droit du Gantt. Le projet est déplié pour que
+    // l'élément créé apparaisse tout de suite sous sa barre.
+    const [newActionInitial, setNewActionInitial] = useState<Partial<ActionCardCreateForm> | null>(null)
+
+    const handleGanttNewAction = useCallback((projectId: number, startDate: string) => {
+        setNewActionInitial({ project_id: projectId, start_date: startDate })
+    }, [])
+
+    const handleGanttActionCreated = useCallback(async () => {
+        const projectId = newActionInitial?.project_id
+        const [ac, pac, amac] = await Promise.all([getActionCardsFull(), getAllProjectActionCards(), getAllMemberActionCards()])
+        setActionCards([...ac])
+        setActionLinks([...pac])
+        setMemberActionCards([...amac])
+        if (projectId) setExpanded(prev => new Set(prev).add(`p-${projectId}`))
+    }, [newActionInitial])
+
+    const handleGanttCreateMilestone = useCallback(async (draft: MilestoneDraft) => {
+        try {
+            // Même statut par défaut que le formulaire de jalon de la fiche projet
+            const statusId = statuses.find(s => s.context === 'action_card')?.id ?? 0
+            const ms = await addProjectMilestone(draft.projectId, { title: draft.title, description: '', due_date: draft.due_date, status_id: statusId })
+            setMileStones(prev => [...prev, ms])
+            setExpanded(prev => new Set(prev).add(`p-${draft.projectId}`))
+        } catch (error) {
+            console.error(error)
+        }
+    }, [statuses])
+
+    // Ids : `p-<projet>`, `ms-<projet>-<jalon>`, `t-<projet>-<action>`
+    const handleGanttDelete = useCallback(async (task: GanttTask) => {
+        const parts = task.id.split('-')
+        try {
+            if (task.type === 'project') {
+                const id = Number(parts[1])
+                await deleteProject(id)
+                setProjects(prev => prev.filter(p => p.id !== id))
+            } else if (task.type === 'milestone') {
+                const id = Number(parts[2])
+                await deleteProjectMilestone(id)
+                setMileStones(prev => prev.filter(m => m.id !== id))
+            } else {
+                const id = Number(parts[2])
+                await deleteActionCard(id)
+                setActionCards(prev => prev.filter(a => a.id !== id))
+            }
+        } catch (error) {
+            console.error(error)
+        }
+    }, [])
+
     const handleAllocationChange = useCallback((expanseId: number, rows: ProjectExpanse[]) => {
         setAllocations(prev => [...prev.filter(a => a.expanse_id !== expanseId), ...rows])
     }, [])
@@ -5347,13 +5401,24 @@ export default function Projects() {
                                 onToggleExpand={handleToggleExpand}
                                 onOpenProject={handleOpenGanttProject}
                                 onOpenAction={handleOpenGanttAction}
+                                onNewAction={handleGanttNewAction}
+                                onCreateMilestone={handleGanttCreateMilestone}
+                                onDelete={handleGanttDelete}
                             />
+
                         )}
                     </div>
                 )
             })()}
 
             {/* Sheets */}
+            <ActionCardSheet
+                open={newActionInitial !== null}
+                onClose={() => setNewActionInitial(null)}
+                onCreated={handleGanttActionCreated}
+                initial={newActionInitial ?? undefined}
+            />
+
             {selectedActionCard && (
             <ActionCardDetailSheet
                 card={toActionCardData(selectedActionCard)}

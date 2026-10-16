@@ -1443,6 +1443,10 @@ export async function createActionCardFull(form: ActionCardCreateForm): Promise<
         allParticipants.forEach((m, i) => {
             mockMemberActionCards.push({ id: linkId + i, member_id: m.member_id, action_card_id: newId, role: m.role })
         })
+        if (form.project_id) {
+            const projectLinkId = Math.max(0, ...mockProjectActionCards.map(p => p.id)) + 1
+            mockProjectActionCards.push({ id: projectLinkId, project_id: form.project_id, action_card_id: newId })
+        }
 
         const statusMap = new Map(mockStatuses.map(s => [s.id, s]))
         const categoryMap = new Map(mockCategories.map(c => [c.id, c]))

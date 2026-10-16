@@ -25,6 +25,8 @@ type Props = {
     onCreated: (card: ActionCardData) => void
     editCard?: ActionCardData
     onUpdated?: (card: ActionCardData) => void
+    // Valeurs préremplies d'une création, par exemple depuis le Gantt
+    initial?: Partial<ActionCardCreateForm>
 }
 
 const ROLES = ['Responsable', 'Contributeur', 'Observateur']
@@ -43,7 +45,6 @@ const EMPTY_FORM: ActionCardCreateForm = {
     members: [],
     project_id: null,
     todo_title: '', todo_items: [],
-    
 }
 
 // --- Recherche membre avec suggestions ---
@@ -198,7 +199,7 @@ function MemberQuickCreateForm({ partners, role, existingEmails = [], onSaved, o
     )
 }
 
-export default function ActionCardSheet({ open, onClose, onCreated, editCard, onUpdated }: Props) {
+export default function ActionCardSheet({ open, onClose, onCreated, editCard, onUpdated, initial }: Props) {
     const currentUser = useCurrentUser()
     const [form, setForm]             = useState<ActionCardCreateForm>(EMPTY_FORM)
     const [submitting, setSubmitting] = useState(false)
@@ -251,6 +252,7 @@ export default function ActionCardSheet({ open, onClose, onCreated, editCard, on
                         status_id: s.find(s => s.context === 'action_card')?.id ?? 0,
                         owner_id:  currentUser?.id ?? m[0]?.id ?? 0,
                         members:   defaultMembers,
+                        ...initial,
                     }))
                 }
             })
@@ -372,7 +374,7 @@ export default function ActionCardSheet({ open, onClose, onCreated, editCard, on
             <SheetContent side="right" showCloseButton={false} className="!w-[480px] flex flex-col gap-0 p-0">
                 <SheetHeader className="px-6 py-4 border-b">
                     <SheetTitle>
-                        {editCard ? editCard.title : 'Nouvelle action card'}
+                        {editCard ? editCard.title : 'Nouvelle action'}
                     </SheetTitle>
                 </SheetHeader>
 
