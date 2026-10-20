@@ -3,6 +3,7 @@ import {
     getMembers, getPartners, getLabs, getProjects, getProjectCalls,
     getAxes, getFinancialAgreements, getFormations,
     getAllProjectMembers, getProjectPartners, getPartnerLabs,
+    getAllTablesRaw,
 } from '@/lib/api'
 import {
     type DB, type QueryableTableKey, type FieldType,
@@ -80,21 +81,24 @@ function matchesFilter(record: Record<string, unknown>, filter: Filter): boolean
     }
 }
 
-async function backupDB(db: DB) {
-    const zip = new JSZip()
-    const tables: (keyof DB)[] = [
-        'members', 'partners', 'labs', 'projects', 'projectCalls',
-        'axes', 'agreements', 'formations',
-        'projectMembers', 'projectPartners', 'partnerLabs'
-    ]
+// Les valeurs non scalaires (RefList Grist ['L', 1, 2], objets) passent en JSON
+// pour rester relisibles au lieu de devenir "L,1,2" ou "[object Object]".
+function toCell(v: unknown): string {
+    if (v === null || v === undefined) return ''
+    return typeof v === 'object' ? JSON.stringify(v) : String(v)
+}
 
-    for (const table of tables) {
-        const rows = db[table] as Record<string, unknown>[]
+async function backupDB() {
+    const zip = new JSZip()
+    const tables = await getAllTablesRaw()
+
+    for (const [table, rows] of Object.entries(tables)) {
         if (rows.length === 0) continue
 
-        const headers = Object.keys(rows[0])
-        const csv = [headers, ...rows.map(r => headers.map(h => String(r[h] ?? '')))]
-            .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        // Union des clés : une ligne mock peut omettre un champ optionnel
+        const headers = [...new Set(rows.flatMap(r => Object.keys(r)))]
+        const csv = [headers, ...rows.map(r => headers.map(h => toCell(r[h])))]
+            .map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
             .join('\n')
 
         zip.file(`${table}.csv`, '\uFEFF' + csv)
@@ -234,7 +238,7 @@ export default function ExportModal({ open, onClose }: { open: boolean; onClose:
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                     <h2 className="text-sm font-semibold text-gray-800">Requête & Export</h2>
                     <button
-                        onClick={() => {if(db) backupDB(db)}}
+                        onClick={() => backupDB()}
                         className="text-xs px-1.5 py-1.5 bg-gray-100 text-black rounded-md hover:bg-indigo-300 disabled:opacity-40 hover-text-indigo-700 disabled:cursor-not-allowed transition-colors"
                     >
                         Exporter toute la base

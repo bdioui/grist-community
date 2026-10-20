@@ -1794,3 +1794,38 @@ export async function deletePublicationMember(id: number): Promise<void> {
     }
     await deleteRecord(T.publication_member, id)
 }
+
+// --- Sauvegarde complète ---
+
+// Le Record impose l'exhaustivité : une table ajoutée à T sans son mock casse
+// la compilation au lieu d'être absente de la sauvegarde.
+const MOCK_TABLES: Record<keyof typeof T, object[]> = {
+    status: mockStatuses, category: mockCategories, member: mockMembers,
+    partner: mockPartners, axis: mockAxes, action_card: mockActionCards,
+    project_call: mockProjectCalls, project: mockProjects,
+    financial_agreement: mockFinancialAgreements, phd: mockPhds,
+    mobility_grant: mockMobilityGrants, budget_category: mockBudgetCategories,
+    budget_detail: mockBudgetDetails, to_do_list: mockToDoLists, to_do_item: mockToDoItems,
+    axis_action_card: mockAxisActionCards, member_action_card: mockMemberActionCards,
+    agreement_action_card: mockAgreementActionCards, project_action_card: mockProjectActionCards,
+    lab: mockLabs, partner_lab: mockPartnerLabs, group: mockGroup, group_member: mockGroupMember,
+    comment: mockComments, project_member: mockProjectMembers, agreement_member: mockAgreementMembers,
+    kpi: mockKpis, kpi_entry: mockKpiEntries, project_partner: mockProjectPartners,
+    project_milestone: mockProjectMilestones, time_entry: mockTimeEntry,
+    formation: mockFormations, project_formation: mockProjectFormations,
+    project_attachment: mockProjectAttachments, program: mockProgram,
+    expanse: mockExpanses, sifac_line: mockSifacLines, expanse_suplier: [],
+    supplier: mockSuppliers, publication: mockPublications,
+    publication_member: mockPublicationMembers, project_expanse: mockProjectExpanses,
+}
+
+// Lignes brutes de toutes les tables de T, indexées par identifiant de table Grist.
+// Pas de normalisation : une sauvegarde doit garder les colonnes telles quelles,
+// y compris celles que l'application ne lit pas.
+export async function getAllTablesRaw(): Promise<Record<string, Record<string, unknown>[]>> {
+    const keys = Object.keys(T) as (keyof typeof T)[]
+    const rows = await Promise.all(keys.map(k =>
+        USE_MOCK ? MOCK_TABLES[k] as Record<string, unknown>[] : fetchTable(T[k])
+    ))
+    return Object.fromEntries(keys.map((k, i) => [T[k], rows[i]]))
+}
